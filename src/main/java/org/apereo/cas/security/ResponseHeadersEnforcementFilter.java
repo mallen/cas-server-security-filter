@@ -27,8 +27,10 @@ import javax.servlet.ServletResponse;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.logging.Logger;
 
@@ -56,12 +58,14 @@ public final class ResponseHeadersEnforcementFilter extends AbstractSecurityFilt
     private static final String INIT_PARAM_ENABLE_STRICT_TRANSPORT_SECURITY = "enableStrictTransportSecurity";
     private static final String INIT_PARAM_ENABLE_STRICT_XFRAME_OPTIONS = "enableXFrameOptions";
     private static final String INIT_PARAM_ENABLE_XSS_PROTECTION = "enableXSSProtection";
+    private static final String INIT_PARAM_ADDITIONAL_STATIC_EXTENSIONS = "additionalStaticExtensions";
 
     private boolean enableCacheControl;
     private boolean enableXContentTypeOptions;
     private boolean enableStrictTransportSecurity;
     private boolean enableXFrameOptions;
     private boolean enableXSSProtection;
+    private List<String> additionalStaticExtensions;
 
     public void setEnableStrictTransportSecurity(final boolean enableStrictTransportSecurity) {
         this.enableStrictTransportSecurity = enableStrictTransportSecurity;
@@ -116,6 +120,27 @@ public final class ResponseHeadersEnforcementFilter extends AbstractSecurityFilt
                     + "] with value [" + enableCacheControl + "]", e));
         }
 
+        if(this.enableCacheControl) {
+            final String additional = filterConfig.getInitParameter(INIT_PARAM_ADDITIONAL_STATIC_EXTENSIONS);
+            if(additional != null && !additional.equals("")) {
+                this.additionalStaticExtensions = new ArrayList<>();
+                try {
+                    final String[] additionalArray = additional.split(",");
+                    for (String extension : additionalArray) {
+                        if (extension != null && !extension.equals("")) {
+                            if (!extension.startsWith(".")) {
+                                this.additionalStaticExtensions.add("." + extension);
+                            } else {
+                                this.additionalStaticExtensions.add(extension);
+                            }
+                        }
+                    }
+                } catch (final Exception e) {
+                    FilterUtils.logException(LOGGER, new ServletException("Error parsing parameter [" + INIT_PARAM_ADDITIONAL_STATIC_EXTENSIONS
+                            + "] with value [" + additional + "]", e));
+                }
+            }
+        }
 
         try {
             this.enableXContentTypeOptions = FilterUtils.parseStringToBooleanDefaultingToFalse(enableXContentTypeOptions);
@@ -161,6 +186,7 @@ public final class ResponseHeadersEnforcementFilter extends AbstractSecurityFilt
     static void throwIfUnrecognizedParamName(final Enumeration initParamNames) throws ServletException {
         final Set<String> recognizedParameterNames = new HashSet<String>();
         recognizedParameterNames.add(INIT_PARAM_ENABLE_CACHE_CONTROL);
+        recognizedParameterNames.add(INIT_PARAM_ADDITIONAL_STATIC_EXTENSIONS);
         recognizedParameterNames.add(INIT_PARAM_ENABLE_XCONTENT_OPTIONS);
         recognizedParameterNames.add(INIT_PARAM_ENABLE_STRICT_TRANSPORT_SECURITY);
         recognizedParameterNames.add(INIT_PARAM_ENABLE_STRICT_XFRAME_OPTIONS);
@@ -176,6 +202,19 @@ public final class ResponseHeadersEnforcementFilter extends AbstractSecurityFilt
                         + RequestParameterPolicyEnforcementFilter.class.getSimpleName() + " expects?"));
             }
         }
+    }
+
+    private boolean isAdditionalStaticExtension(final String uri){
+        if(this.additionalStaticExtensions == null || this.additionalStaticExtensions.isEmpty()) {
+            return false;
+        }
+
+        for (String additionalStaticExtension : this.additionalStaticExtensions) {
+            if(uri.endsWith(additionalStaticExtension)){
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
@@ -197,7 +236,8 @@ public final class ResponseHeadersEnforcementFilter extends AbstractSecurityFilt
                             && !uri.endsWith(".ico")
                             && !uri.endsWith(".jpeg")
                             && !uri.endsWith(".bmp")
-                            && !uri.endsWith(".gif")) {
+                            && !uri.endsWith(".gif")
+                            && !isAdditionalStaticExtension(uri)) {
                         httpServletResponse.addHeader("Cache-Control", "no-cache, no-store, max-age=0, must-revalidate");
                         httpServletResponse.addHeader("Pragma", "no-cache");
                         httpServletResponse.addIntHeader("Expires", 0);
